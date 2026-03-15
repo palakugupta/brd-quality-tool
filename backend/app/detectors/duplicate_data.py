@@ -2,6 +2,7 @@
 duplicate_data.py
 ─────────────────
 Detects repeated/duplicate content within the BRD.
+Optimized for block-level analysis.
 """
 
 from difflib import SequenceMatcher
@@ -11,15 +12,18 @@ import re
 from ..models import insert_finding
 
 
+# ─────────────────────────────────────────────
+# Heading detector
+# ─────────────────────────────────────────────
+
 def _is_heading(text: str) -> bool:
-    """Return True if the line looks like a heading rather than content."""
 
     t = text.strip()
 
     if not t:
         return True
 
-    # All caps headings
+    # ALL CAPS headings
     if t.upper() == t and len(t.split()) <= 6:
         return True
 
@@ -27,49 +31,67 @@ def _is_heading(text: str) -> bool:
     if t.endswith(":"):
         return True
 
-    # Numbered heading like "1. Lead Management"
-    if re.match(r"^\d+[\.\)]\s+\w", t) and len(t) < 40:
+    # Numbered headings
+    if re.match(r"^\d+[\.\)]\s+\w", t) and len(t) < 50:
         return True
 
     return False
 
+
+# ─────────────────────────────────────────────
+# Chunk lookup
+# ─────────────────────────────────────────────
+
+def _find_chunk_id(line_no: int, chunks: List[Dict[str, Any]]) -> Optional[int]:
+
+    for ch in chunks:
+        if ch["start_line"] <= line_no <= ch["end_line"]:
+            return ch["chunk_id"]
+
+    if chunks:
+        return chunks[0]["chunk_id"]
+
+    return None
+
+
+# ─────────────────────────────────────────────
+# Main detector
+# ─────────────────────────────────────────────
 
 def detect(
     brd_text: str,
     chunks: List[Dict[str, Any]],
 ) -> None:
 
+    if not brd_text:
+        return
+
     lines = brd_text.splitlines()
 
     sentences = [
         (i, line.strip())
         for i, line in enumerate(lines, start=1)
-        if len(line.strip()) >= 60 and not _is_heading(line.strip())
+        if len(line.strip()) >= 70 and not _is_heading(line.strip())
     ]
 
     if len(sentences) < 2:
         return
 
-    def find_chunk_id(line_no: int) -> Optional[int]:
-
-        for ch in chunks:
-            if ch["start_line"] <= line_no <= ch["end_line"]:
-                return ch["chunk_id"]
-
-        return None
-
     findings_added = 0
     reported_pairs = set()
 
-    for i in range(len(sentences)):
+    # limit comparisons to prevent explosion
+    max_sentences = min(len(sentences), 60)
+
+    for i in range(max_sentences):
 
         line_i, text_i = sentences[i]
 
-        for j in range(i + 1, len(sentences)):
+        for j in range(i + 1, max_sentences):
 
             line_j, text_j = sentences[j]
 
-            # Must be at least 5 lines apart
+            # ignore nearby lines
             if abs(line_j - line_i) < 5:
                 continue
 
@@ -84,9 +106,9 @@ def detect(
                 text_j.lower(),
             ).ratio()
 
-            if similarity >= 0.85:
+            if similarity >= 0.88:
 
-                chunk_id = find_chunk_id(line_i) or find_chunk_id(line_j)
+                chunk_id = _find_chunk_id(line_i, chunks)
 
                 if not chunk_id:
                     continue
@@ -96,7 +118,7 @@ def detect(
                     error_type="duplicate_data",
                     severity="minor",
                     line_number=line_i,
-                    description=text_i,
+                    description=text_i[:250],
                     source_reference=(
                         f"Duplicate Data: lines {line_i} and {line_j} "
                         f"are {similarity:.0%} similar."

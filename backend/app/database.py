@@ -73,6 +73,25 @@ def init_db() -> None:
         """
     )
 
+    # Audit trail of analysis runs (metrics per run)
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS analysis_runs (
+            run_id INTEGER PRIMARY KEY,
+            sow_doc_id INTEGER,
+            mom_doc_id INTEGER,
+            brd_doc_id INTEGER,
+            start_timestamp TEXT,
+            end_timestamp TEXT,
+            total_findings INTEGER,
+            coverage_score REAL,
+            FOREIGN KEY (sow_doc_id) REFERENCES documents(doc_id),
+            FOREIGN KEY (mom_doc_id) REFERENCES documents(doc_id),
+            FOREIGN KEY (brd_doc_id) REFERENCES documents(doc_id)
+        );
+        """
+    )
+
     conn.commit()
     conn.close()
 
